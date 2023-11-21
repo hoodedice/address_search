@@ -1,8 +1,5 @@
 mod errors;
-
-pub fn routes() {
-
-}
+use crate::routes;
 
 pub fn start() {
 
