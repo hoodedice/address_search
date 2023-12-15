@@ -1,0 +1,297 @@
+use arrow::array::{LargeStringArray, Scalar};
+use arrow::compute::kernels::comparison::contains;
+use arrow::record_batch::RecordBatch;
+use arrow::util::pretty::print_batches;
+use futures::TryStreamExt;
+use parquet::arrow::arrow_reader::{ArrowPredicateFn, RowFilter};
+use parquet::arrow::async_reader::ParquetRecordBatchStream;
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
+use tokio::fs::File;
+
+// const PATH: &str = "data/full_address_data.parquet";
+const PATH: &str = "data/data/address_data_part_100.parquet";
+
+/**
+ * @see: https://github.com/apache/arrow-rs/blob/master/parquet/examples/async_read_parquet.rs
+ */
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), ()> {
+    let file = File::open(PATH).await.unwrap_or_else(|err| {
+        panic!("Parquet: Error while opening file: {}", err);
+    });
+
+    // let schema = get_schema(file.try_clone().await.unwrap()).await;
+
+    let mut builder = ParquetRecordBatchStreamBuilder::new(file)
+        .await
+        .unwrap()
+        .with_batch_size(8192);
+
+    let file_metadata = builder.metadata().file_metadata().clone();
+    // let mask = ProjectionMask::roots(file_metadata.schema_descr());
+    // Set projection mask to read only root columns 1 and 2.
+    // builder = builder.with_projection(mask);
+
+    // Build a async parquet reader.
+    // let schema2 = builder.schema().clone();
+
+    // let start = SystemTime::now();
+
+    // let filter = ArrowPredicateFn::new(vec![
+    //     (
+    //         "street".to_string(),
+    //         move |b| eq(
+    //             b.column(4),
+    //             &Scalar::new("euclid".to_string())
+    //         ),
+    //     )
+
+    // ]);
+
+    // let scalar = LargeStringArray::from(vec!["EUCLID"]);
+    // let filternum = ArrowPredicateFn::new(ProjectionMask::all(), move |record_batch| {
+    //     contains(
+    //         record_batch.column(3),
+    //         &Scalar::new(&LargeStringArray::from(vec!["EUCLID"])),
+    //     )
+    // });
+
+    // let filterst = ArrowPredicateFn::new(ProjectionMask::all(), move |record_batch| {
+    //     contains(
+    //         record_batch.column(3),
+    //         &Scalar::new(LargeStringArray::from(vec!["EUCLID"])),
+    //     )
+    // });
+
+    // let filterst2 = ArrowPredicateFn::new(
+    //     // ProjectionMask::roots(file_metadata.schema_descr(), [0, 1, 2, 3]),
+    //     ProjectionMask::all(),
+    //     move |record_batch| contains(
+    //         record_batch.column(4),
+    //         &Scalar::new(LargeStringArray::from(vec!["EUCLID"]))
+    //     ),
+    // );
+
+    // let row_filter = RowFilter::new(vec![Box::new(filternum), Box::new(filterst), Box::new(filterst2)]);
+    // let row_filter = RowFilter::new(vec![Box::new(filternum)]);
+
+    // builder = builder.with_row_filter(row_filter);
+
+    let stream: ParquetRecordBatchStream<File> = builder.build().unwrap();
+
+    // stream
+    let result = stream.try_collect::<Vec<_>>().await.unwrap_or_else(|err| {
+        panic!("Parquet: Error while reading file: {}", err);
+    });
+
+    // println!("took: {} ms", start.elapsed().unwrap().as_millis());
+
+    let x: Vec<RecordBatch> = result
+        .iter()
+        .filter_map(|batch| {
+            let val = batch
+                .column(3)
+                .as_any()
+                .downcast_ref::<LargeStringArray>()
+                .unwrap();
+            println!("val: {:?}", val);
+            if (stringify!(val).contains("BOWLING")) {
+                println!("Found!");
+                return Some(batch.clone());
+            }
+
+            None
+        })
+        .collect();
+
+    // result.columns().iter()
+    //     .map(|column| {
+    //         let filtered_array = column.as_any().downcast_ref::<Float64Array>().unwrap()
+    //             .filter(condition_array.as_ref());
+    //         filtered_array.into()
+    //     })
+    // .collect()
+    // print_batches(&result).unwrap();
+    // println!("{:#?}", &result.);
+    println!("End Parquet!");
+
+    Ok(())
+}
+
+// if let Ok(file) = File::open(&path) {
+//     let reader = SerializedFileReader::new(file)
+//         .unwrap_or_else(|err| {
+//             panic!("Parquet: Error while reading file: {}", err);
+//         });
+
+//     let parquet_metadata = reader.metadata();
+//     // print out parquet metadata
+//     println!("Parquet Metadata: {:?}", parquet_metadata.num_row_groups());
+
+// }
+
+// file;
+
+// Highlight: set `RowFilter`, it'll push down filter predicates to skip IO and decode.
+// For more specific usage: please refer to https://github.com/apache/arrow-datafusion/blob/master/datafusion/core/src/physical_plan/file_format/parquet/row_filter.rs.
+
+/**
+ * GroupType {
+    basic_info: BasicTypeInfo {
+        name: "root",
+        repetition: None,
+        converted_type: NONE,
+        logical_type: None,
+        id: None,
+    },
+    fields: [
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "id",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: NONE,
+                logical_type: None,
+                id: None,
+            },
+            physical_type: INT64,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "zipcode",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: NONE,
+                logical_type: None,
+                id: None,
+            },
+            physical_type: INT64,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "number",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: UTF8,
+                logical_type: Some(
+                    String,
+                ),
+                id: None,
+            },
+            physical_type: BYTE_ARRAY,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "street",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: UTF8,
+                logical_type: Some(
+                    String,
+                ),
+                id: None,
+            },
+            physical_type: BYTE_ARRAY,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "street2",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: UTF8,
+                logical_type: Some(
+                    String,
+                ),
+                id: None,
+            },
+            physical_type: BYTE_ARRAY,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "city",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: UTF8,
+                logical_type: Some(
+                    String,
+                ),
+                id: None,
+            },
+            physical_type: BYTE_ARRAY,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "state",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: UTF8,
+                logical_type: Some(
+                    String,
+                ),
+                id: None,
+            },
+            physical_type: BYTE_ARRAY,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "latitude",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: NONE,
+                logical_type: None,
+                id: None,
+            },
+            physical_type: DOUBLE,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+        PrimitiveType {
+            basic_info: BasicTypeInfo {
+                name: "longitude",
+                repetition: Some(
+                    OPTIONAL,
+                ),
+                converted_type: NONE,
+                logical_type: None,
+                id: None,
+            },
+            physical_type: DOUBLE,
+            type_length: -1,
+            scale: -1,
+            precision: -1,
+        },
+    ],
+}
+ */
+
+fn suggestion(q: String) {}

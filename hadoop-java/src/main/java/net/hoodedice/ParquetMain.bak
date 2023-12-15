@@ -1,0 +1,183 @@
+package net.hoodedice;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.Tool;
+import org.apache.hadoop.util.ToolRunner;
+import org.apache.parquet.example.data.Group;
+import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.ParquetInputSplit;
+import org.apache.parquet.hadoop.example.ExampleInputFormat;
+import org.apache.parquet.hadoop.example.ExampleOutputFormat;
+import org.apache.parquet.hadoop.example.GroupWriteSupport;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.hadoop.util.HadoopInputFile;
+import org.apache.parquet.schema.MessageType;
+
+import java.io.IOException;
+import java.util.Iterator;
+import java.util.List;
+
+/**
+ * https://github.com/cloudera/parquet-examples/blob/master/MapReduce/TestReadParquet.java
+ * https://github.com/cloudera/parquet-examples/blob/cdh6.x/MapReduce/TestReadWriteParquet.java
+ */
+public class ParquetMain extends Configured implements Tool {
+    static final String inputFile = "hdfs:///user/root/full_address_data.parquet";
+    static final String outputFile = "hdfs:///user/root/test.parquet";
+
+    public static final Log log = LogFactory.getLog(ParquetMain.class);
+
+//    static final String outputFile = "addresses.json";
+
+    public static void main(String[] args) throws Exception {
+
+        try {
+            int res = ToolRunner.run(new Configuration(), new ParquetMain(), args);
+            System.exit(res);
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.exit(255);
+        }
+
+        /*
+ Set the output key and value classes
+
+*/
+//        job.setOutputKeyClass(NullWritable.class);
+//        job.setOutputValueClass(Group.class);
+    }
+
+    public int run(String[] args) throws Exception {
+        String query = args[0];
+
+        System.out.println("Got arg :" + args[0]);
+
+        if (query == null || query.isEmpty()) {
+            throw new Error("A query is required");
+        }
+
+        Path parquetFilePath = null;
+        try {
+            parquetFilePath = new Path(inputFile);
+        } catch (IllegalArgumentException e) {
+            System.err.println("MapReduce: Could not open file at path: " + inputFile);
+        }
+
+        Configuration conf = new Configuration();
+        conf.set("query", query);
+        conf.set("mapreduce.map.java.opts", "-Xmx4096m"); // Adjust the heap size as needed
+//        conf.set("mapreduce.reduce.java.opts", "-Xmx10737m"); // Adjust the heap size as needed
+
+
+        // https://stackoverflow.com/a/31823374
+        FileSystem hdfs = FileSystem.get(conf);
+        if (hdfs.exists(new Path(outputFile))) hdfs.delete(new Path(outputFile), true);
+
+        HadoopInputFile pf = HadoopInputFile.fromPath(parquetFilePath, conf);
+        ParquetFileReader pfReader = ParquetFileReader.open(pf);
+        ParquetMetadata footer = pfReader.getFooter();
+        MessageType schema = footer.getFileMetaData().getSchema();
+        GroupWriteSupport.setSchema(schema, conf);
+
+        System.out.println("Parquet configuration finished");
+
+
+        Job job = Job.getInstance(conf, "Address Search");
+        job.setJarByClass(ParquetMain.class);
+        job.setJobName("Address Search");
+
+        // Set the mapper and reducer classes
+        job.setMapperClass(AddressMapper.class);
+//        job.setReducerClass(AddressReducer.class);
+        job.setNumReduceTasks(0);
+        // Set the input and output formats
+        job.setInputFormatClass(ExampleInputFormat.class);
+        job.setOutputFormatClass(ExampleOutputFormat.class);
+//        job.setOutputFormatClass(JsonOutputFormat.class); // Adjust according to your output format
+
+        CompressionCodecName codec = CompressionCodecName.GZIP;
+        ExampleOutputFormat.setCompression(job, codec);
+
+        // Set the input and output paths
+        FileInputFormat.setInputPaths(job, new Path(inputFile));
+        FileOutputFormat.setOutputPath(job, new Path(outputFile));
+
+        System.out.println("Hadoop configuration finished");
+
+        job.waitForCompletion(true);
+
+        return 0;
+    }
+
+
+    public static class AddressMapper extends Mapper<LongWritable, Group, Void, Group> {
+        private static List<AddressRecord.FieldDescription> expectedFields = null;
+
+
+        @Override
+        protected void map(LongWritable key, Group value, Context context) throws IOException, InterruptedException {
+            Configuration conf = context.getConfiguration();
+            String query = conf.get("query");
+//            log.info("MapReduce DEBUG: query " + query);
+//            log.info("MapReduce DEBUG: row " + value);
+//            NullWritable outKey = NullWritable.get();
+            if(expectedFields == null) {
+                // Get the file schema which may be different from the fields in a particular record) from the input split
+                String fileSchema = ((ParquetInputSplit)context.getInputSplit()).getFileSchema();
+                // System.err.println("file schema from context: " + fileSchema);
+                AddressRecord.RecordSchema schema = new AddressRecord.RecordSchema(fileSchema);
+                expectedFields = schema.getFields();
+                //System.err.println("inferred schema: " + expectedFields.toString());
+            }
+
+            boolean hasContent = false;
+            String line = value.toString();
+            String[] fields = line.split("\n");
+            Iterator<AddressRecord.FieldDescription> it = expectedFields.iterator();
+            while(it.hasNext()) {
+                if(hasContent) {
+                    csv.append(',');
+                }
+            // Assuming your Parquet schema has a field named "street"
+//            CharSequence street = (CharSequence) value.getString("street", 3);
+            // Get the whole row as string
+//            Group record = value;
+
+
+//            log.info("MapReduce DEBUG: ROW " + record);
+
+//            log.info("MapReduce DEBUG: street val " + street);
+//
+//            if (street != null && street.toString().contains(query)) {
+//                context.write(outKey, value);
+//            }
+
+            context.write(null, value);
+        }
+    }
+
+    public static class AddressReducer extends Reducer<Text, Group, NullWritable, Group> {
+
+        @Override
+        protected void reduce(Text key, Iterable<Group> values, Context context)
+                throws IOException, InterruptedException {
+            for (Group value : values) {
+                context.write(NullWritable.get(), value);
+            }
+        }
+    }
+}
